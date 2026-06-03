@@ -57,6 +57,18 @@ struct RobotEyesView: View {
                     .font(.system(size: size * 0.95, weight: .bold))
             }
 
+        case .askConfirm:
+            // Left eye = red ✗ (decline), right eye = green ✓ (accept).
+            if side == .left {
+                Image(systemName: "xmark")
+                    .font(.system(size: size * 0.85, weight: .bold))
+                    .foregroundStyle(Color(hex: 0xFF453A))
+            } else {
+                Image(systemName: "checkmark")
+                    .font(.system(size: size * 0.85, weight: .bold))
+                    .foregroundStyle(Color(hex: 0x34C759))
+            }
+
         case .loadingModel:
             ArcRing()
                 .stroke(color, style: .init(lineWidth: size * 0.16, lineCap: .round))
@@ -67,18 +79,18 @@ struct RobotEyesView: View {
             // Pupils looking down-ish (◔).
             pupilEye(offset: CGSize(width: 0, height: 0.4))
 
-        case .thinking:
-            // Pupils follow the alternating gaze.
+        case .thinking, .lookingAtScreenshot:
+            // Pupils follow the alternating gaze (scanning the text).
             pupilEye(offset: animator.gaze)
 
-        default: // idle, listening, speaking
+        default: // idle, listening, speaking, curious
             openEye
         }
     }
 
     /// A solid eye that becomes a thin slit when blinking.
     private var openEye: some View {
-        let attentive = (state == .listening)
+        let attentive = (state == .listening || state == .curious)
         let h = animator.eyesClosed ? size * 0.16 : size
         return Capsule()
             .fill(color)

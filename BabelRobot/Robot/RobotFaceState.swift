@@ -23,6 +23,12 @@ enum RobotFaceState: Equatable, Sendable, CaseIterable {
     case unloadingModel
     /// Awake and idle, but the pupils/head track the cursor (companion mode).
     case lookingAtCursor
+    /// A screenshot was just provided — interested / attentive.
+    case curious
+    /// Reading text out of a screenshot (OCR in progress).
+    case lookingAtScreenshot
+    /// Offering a yes/no choice: one eye a red ✗, the other a green ✓.
+    case askConfirm
 
     /// Short caption shown under the face.
     var caption: String {
@@ -40,6 +46,9 @@ enum RobotFaceState: Equatable, Sendable, CaseIterable {
         case .loadingModel:   return "Loading model…"
         case .unloadingModel: return "Unloading model…"
         case .lookingAtCursor: return "Watching"
+        case .curious:        return "Curious…"
+        case .lookingAtScreenshot: return "Reading screenshot…"
+        case .askConfirm:     return "Analyze it?"
         }
     }
 }

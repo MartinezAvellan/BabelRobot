@@ -47,16 +47,16 @@ struct RobotMouthView: View {
                 .frame(width: width * 0.6, height: 6)
                 .offset(y: width * 0.12)
 
-        case .warning, .idle, .lookingAtCursor:
+        case .warning, .idle, .lookingAtCursor, .askConfirm:
             Capsule().fill(color)
                 .frame(width: width * 0.7, height: 8)
 
-        case .listening:
+        case .listening, .curious:
             Circle()
                 .stroke(color, lineWidth: 6)
                 .frame(width: width * 0.3, height: width * 0.3)
 
-        case .thinking, .loadingModel, .unloadingModel:
+        case .thinking, .loadingModel, .unloadingModel, .lookingAtScreenshot:
             EllipsisMouth(color: color)
 
         case .speaking:

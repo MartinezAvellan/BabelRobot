@@ -49,10 +49,10 @@ enum RobotFaceMood {
         case .warning:                                 return warning
         case .love:                                    return blush
         case .confused:                                return puzzled
-        case .thinking, .loadingModel, .unloadingModel: return working
+        case .thinking, .loadingModel, .unloadingModel, .lookingAtScreenshot: return working
         case .happy:                                   return happy
-        case .idle, .listening, .speaking, .sleeping, .lookingAtCursor:
-            return base
+        case .idle, .listening, .speaking, .sleeping, .lookingAtCursor, .curious, .askConfirm:
+            return base   // askConfirm colors its eyes individually (red ✗ / green ✓)
         }
     }
 

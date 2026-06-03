@@ -68,7 +68,7 @@ final class RobotFaceAnimator {
             startBlink()
             if !reduceMotion { startBreathing(period: 2.4, amount: 0.03) }
 
-        case .thinking:
+        case .thinking, .lookingAtScreenshot:
             if !reduceMotion { startThinkingGaze() }
 
         case .speaking:
