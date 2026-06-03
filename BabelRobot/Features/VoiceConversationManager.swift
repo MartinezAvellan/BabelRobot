@@ -138,6 +138,38 @@ final class VoiceConversationManager {
 
     func toggleMute() { muted.toggle() }
 
+    // MARK: - External streaming speech (e.g. Screenshot Understanding)
+    //
+    // These mirror the voice turn's own speaking pipeline EXACTLY — same TTS
+    // config (voice, rate, volume) and same sentence pacing via drainSentences —
+    // so a spoken answer from another feature sounds identical to a Talk reply.
+
+    /// Begin a streamed spoken response. Returns true if it will actually speak
+    /// (voice enabled, auto-speak on, not muted).
+    @discardableResult
+    func beginStreamingSpeech() -> Bool {
+        guard enabled, autoSpeak, !muted else { return false }
+        tts.stop()
+        pendingSentence = ""
+        configureTTS()
+        tts.startStream()   // onStart (first utterance) → .speaking face
+        return true
+    }
+
+    /// Feed a token delta; complete sentences are spoken as they arrive.
+    func feedStreamingSpeech(_ chunk: String) {
+        pendingSentence += chunk
+        for sentence in drainSentences() { tts.enqueue(sentence) }
+    }
+
+    /// No more text — flush the remainder and close the queue (onFinish → idle).
+    func endStreamingSpeech() {
+        let rest = pendingSentence.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !rest.isEmpty { tts.enqueue(rest) }
+        pendingSentence = ""
+        tts.finishStream()
+    }
+
     /// Cancel any active listening / generation / speech (new turn or disable).
     func cancelActive() {
         idleResetTask?.cancel()

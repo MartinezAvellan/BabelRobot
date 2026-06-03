@@ -14,6 +14,7 @@ struct MainRobotView: View {
     @Bindable var theme: ThemeManager
     @Bindable var companion: DesktopCompanionManager
     @Bindable var voice: VoiceConversationManager
+    @Bindable var screenshot: ScreenshotUnderstandingViewModel
     @FocusState private var promptFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var colorScheme
@@ -22,29 +23,31 @@ struct MainRobotView: View {
     /// effective (the system one, or one forced by the theme preference).
     private var palette: BabelRobotPalette { theme.palette(for: colorScheme) }
 
+    /// The window's tabs.
+    private enum Tab: Hashable { case assistant, voice, companion }
+    @State private var selectedTab: Tab = .assistant
+
     var body: some View {
-        ScrollView {
-            VStack(spacing: 20) {
-                themeBar
-                statusSection
-                offlineBadge
-                modelControls
-                promptSection
-                responseSection
-                voiceSection
-                settingsSection
-                companionSection
-                SystemMetricsView(metrics: viewModel.metricsMonitor.metrics)
+        VStack(spacing: 0) {
+            header
+            Divider()
+            TabView(selection: $selectedTab) {
+                assistantTab
+                    .tabItem { Label("Assistant", systemImage: "text.bubble") }
+                    .tag(Tab.assistant)
+                voiceTab
+                    .tabItem { Label("Voice", systemImage: "waveform") }
+                    .tag(Tab.voice)
+                companionTab
+                    .tabItem { Label("Companion", systemImage: "macwindow.on.rectangle") }
+                    .tag(Tab.companion)
             }
-            .padding(24)
-            .frame(maxWidth: 640)
-            .frame(maxWidth: .infinity)
         }
         .background(palette.background.ignoresSafeArea())
         .foregroundStyle(palette.primaryText)
         .tint(palette.accent)
         .environment(\.palette, palette)
-        .frame(minWidth: 560, minHeight: 720)
+        .frame(minWidth: 600, minHeight: 720)
         .onAppear {
             viewModel.animator.reduceMotion = reduceMotion
             viewModel.syncAnimator()
@@ -62,43 +65,136 @@ struct MainRobotView: View {
         }
     }
 
-    // MARK: Theme switcher
+    // MARK: Header (always visible above the tabs)
 
-    private var themeBar: some View {
-        HStack {
-            Spacer()
-            Picker("Theme", selection: $theme.preference) {
-                ForEach(ThemeManager.Preference.allCases) { pref in
-                    Label(pref.label, systemImage: pref.symbol).tag(pref)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .fixedSize()
-            .accessibilityLabel("Appearance theme")
-        }
-    }
-
-    // MARK: Status (the robot itself now lives only in the floating companion)
-
-    private var statusSection: some View {
+    private var header: some View {
         VStack(spacing: 8) {
-            Text(viewModel.statusCaption)
-                .font(.headline)
-                .foregroundStyle(.secondary)
-                .contentTransition(.opacity)
+            HStack {
+                Text(viewModel.statusCaption)
+                    .font(.headline)
+                    .foregroundStyle(.secondary)
+                    .contentTransition(.opacity)
+                Spacer()
+                Picker("Theme", selection: $theme.preference) {
+                    ForEach(ThemeManager.Preference.allCases) { pref in
+                        Label(pref.label, systemImage: pref.symbol).tag(pref)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
+                .accessibilityLabel("Appearance theme")
+            }
             if viewModel.faceState == .loadingModel {
                 VStack(spacing: 4) {
                     ProgressView(value: viewModel.loadProgress)
                         .progressViewStyle(.linear)
-                        .frame(maxWidth: 260)
                     Text("Downloading model… \(Int((viewModel.loadProgress * 100).rounded()))%")
                         .font(.caption)
                         .monospacedDigit()
                         .foregroundStyle(.secondary)
                 }
             }
+            // Compact device metrics, right under the status / theme row.
+            SystemMetricsView(metrics: viewModel.metricsMonitor.metrics)
+            // Local model controls, just below Device.
+            modelControls
         }
+        .padding(.horizontal, 24)
+        .padding(.top, 14)
+        .padding(.bottom, 10)
+    }
+
+    // MARK: Tabs
+
+    /// Standard scrollable container for a tab's sections.
+    private func tabScroll<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        ScrollView {
+            VStack(spacing: 20) { content() }
+                .padding(24)
+                .frame(maxWidth: 640)
+                .frame(maxWidth: .infinity)
+        }
+    }
+
+    private var assistantTab: some View {
+        tabScroll {
+            offlineBadge
+            clipboardControls
+            promptSection
+            responseSection
+            settingsSection
+        }
+    }
+
+    private var voiceTab: some View { tabScroll { voiceSection } }
+
+    private var companionTab: some View { tabScroll { companionSection } }
+
+    // MARK: Screenshot & clipboard (below Local Model)
+
+    private var clipboardControls: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 10) {
+                Toggle(isOn: $screenshot.watchClipboard) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Watch clipboard")
+                        Text("Copies & screenshots are offered for analysis; the text lands in the prompt.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .toggleStyle(.switch)
+
+                if screenshot.pending != nil { clipboardPrompt }
+
+                HStack {
+                    Button { screenshot.pasteScreenshot() } label: {
+                        Label("Paste", systemImage: "doc.on.clipboard")
+                    }
+                    Button { screenshot.chooseImage() } label: {
+                        Label("Choose Image", systemImage: "folder")
+                    }
+                    Button { screenshot.clear() } label: {
+                        Label("Clear", systemImage: "xmark.circle")
+                    }
+                    .disabled(screenshot.image == nil && !screenshot.hasText)
+                    Spacer()
+                    if screenshot.isBusy { ProgressView().controlSize(.small) }
+                }
+
+                if let error = screenshot.errorMessage {
+                    Label(error, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+                Text("Tip: a normal screenshot saves to a file. Use ⌃⇧⌘4 (or set the screenshot tool to “Clipboard”) so it’s offered.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        } label: {
+            Label("Screenshot & clipboard", systemImage: "text.viewfinder")
+        }
+    }
+
+    /// In-window "Analyze it?" banner (mirrors the robot's bubble; works even
+    /// when the companion is hidden).
+    private var clipboardPrompt: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "doc.on.clipboard.fill")
+                .foregroundStyle(palette.accent)
+            Text(screenshot.pending?.prompt ?? "")
+                .font(.callout)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer()
+            Button("Analyze") { screenshot.acceptPending() }
+                .buttonStyle(.borderedProminent)
+            Button("No") { screenshot.dismissPending() }
+        }
+        .padding(10)
+        .background(palette.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(palette.accent.opacity(0.4)))
     }
 
     private var offlineBadge: some View {
@@ -550,5 +646,6 @@ struct MainRobotView: View {
         viewModel: RobotAssistantViewModel(),
         theme: ThemeManager(),
         companion: DesktopCompanionManager(),
-        voice: VoiceConversationManager())
+        voice: VoiceConversationManager(),
+        screenshot: ScreenshotUnderstandingViewModel())
 }

@@ -192,6 +192,29 @@ final class RobotAssistantViewModel {
         return await performGeneration(prompt: prompt, onText: onChunk)
     }
 
+    /// Generate for an auxiliary feature (e.g. Screenshot Understanding) into the
+    /// SHARED response box and shared face — so there is one answer area for
+    /// everything. Streams each chunk to `onText` (for incremental TTS). Returns
+    /// the full text, or nil if no model is loaded / busy / failed.
+    func generateShared(
+        prompt: String,
+        onText: @escaping @MainActor (String) -> Void
+    ) async -> String? {
+        guard isModelLoaded else {
+            errorMessage = "Please load a local model first."
+            return nil
+        }
+        guard !isBusy else { return nil }
+        return await performGeneration(prompt: prompt, onText: onText)
+    }
+
+    /// Clear only the shared response (not the prompt).
+    func clearResponse() {
+        responseText = ""
+        errorMessage = nil
+        syncAnimator()
+    }
+
     func stop() {
         manager.cancelGeneration()
         runTask?.cancel()
