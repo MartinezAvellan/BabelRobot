@@ -66,8 +66,37 @@ final class DesktopCompanionManager: NSObject, NSWindowDelegate {
     /// listening / transcribing / TTS-speaking. nil → let emotion/behavior win.
     var voiceState: RobotFaceState? { didSet { refresh() } }
 
+    /// Face override from the Screenshot Understanding feature (curious /
+    /// reading / thinking / speaking / result). Sits below voice but above the
+    /// emotion/behavior engines. nil → not active.
+    var screenshotState: RobotFaceState? { didSet { refresh() } }
+
     /// Real-time TTS loudness (0…1) for the tuner mouth while speaking aloud.
     var audioLevel: Float = 0
+
+    /// When set, the companion shows a speech bubble with this text plus ✓/✗
+    /// buttons, and the face becomes `.askConfirm` (red ✗ / green ✓ eyes).
+    var confirmPrompt: String? {
+        didSet {
+            if confirmPrompt != nil { wake() }   // make sure the robot is awake/visible
+            refresh()
+        }
+    }
+    /// Called when the user taps ✓ / ✗ in the confirm bubble.
+    var onConfirmAccept: (() -> Void)?
+    var onConfirmDecline: (() -> Void)?
+
+    /// Quick screenshot actions shown as buttons on the robot once OCR text is
+    /// ready (empty = hidden). The view observes this.
+    var screenshotActions: [ScreenshotAction] = []
+    /// Called when the user taps one of those action buttons.
+    var onScreenshotAction: ((ScreenshotAction) -> Void)?
+    /// Called when the user taps ✗ to dismiss the action buttons (back to voice).
+    var onScreenshotDismiss: (() -> Void)?
+
+    /// Voice manager, so the robot can show Talk / Stop Listening / Stop / Mute
+    /// buttons. Set in wireUp (the view reads it reactively).
+    var voice: VoiceConversationManager?
 
     /// Invoked when the user clicks the robot (e.g. to start a voice turn).
     var onActivate: (() -> Void)?
@@ -166,6 +195,18 @@ final class DesktopCompanionManager: NSObject, NSWindowDelegate {
         onActivate?()
     }
 
+    /// User tapped ✓ in the confirm bubble.
+    func confirmAccept() {
+        confirmPrompt = nil
+        onConfirmAccept?()
+    }
+
+    /// User tapped ✗ in the confirm bubble.
+    func confirmDecline() {
+        confirmPrompt = nil
+        onConfirmDecline?()
+    }
+
     // MARK: - Show / hide
 
     private func applyEnabled() {
@@ -242,7 +283,10 @@ final class DesktopCompanionManager: NSObject, NSWindowDelegate {
     // MARK: - State fusion
 
     private func refresh() {
-        let state = voiceState ?? emotion.activeState ?? behavior.baseState
+        // A pending confirm beats everything: show the ✗ / ✓ face.
+        let state = confirmPrompt != nil
+            ? .askConfirm
+            : (voiceState ?? screenshotState ?? emotion.activeState ?? behavior.baseState)
         if state != faceState {
             faceState = state
             animator.update(for: state)
