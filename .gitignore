@@ -1,0 +1,63 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+
+# Xcode — build artifacts
+DerivedData/
+build/
+*.moved-aside
+*.pbxuser
+!default.pbxuser
+*.mode1v3
+!default.mode1v3
+*.mode2v3
+!default.mode2v3
+*.perspectivev3
+!default.perspectivev3
+
+# Xcode — per-user state (keep the project, drop personal layout/breakpoints)
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+*.xccheckout
+
+# Swift Package Manager
+.build/
+.swiftpm/
+Package.resolved
+
+# Local model weights and caches — never commit these (gigabytes, downloaded at runtime)
+Documents/LLMs/
+Models/weights/
+*.safetensors
+*.gguf
+*.mlx
+*.npz
+
+# Hugging Face / MLX caches
+.cache/
+huggingface/
+**/huggingface/
+.mlx/
+
+# Benchmark / scratch outputs
+benchmarks/
+*.benchmark
+*.log
+scratch/
+tmp/
+
+# Editor / OS noise
+*.swp
+*~
+.idea/
+.vscode/
+
+# AI assistant / local agent artifacts
+.claude/
+CLAUDE.md
+claude.md
+prompts/
