@@ -36,8 +36,13 @@ struct BabelRobotApp: App {
 
     /// Connect the independent managers together (closures, no hard refs).
     private func wireUp() {
-        // Mirror the assistant's lifecycle onto the desktop companion.
-        companion.connectAI { viewModel.faceState }
+        // Mirror the assistant's lifecycle onto the desktop companion. The
+        // context closure lets the Personality Model read the conversation's tone
+        // at end-of-turn (classification only — never used to answer).
+        companion.connectAI(
+            stateProvider: { viewModel.faceState },
+            contextProvider: { (viewModel.promptText, viewModel.responseText) }
+        )
 
         // Clicking the robot starts a voice turn (when voice is enabled).
         companion.onActivate = { [voice] in voice.toggleTalk() }

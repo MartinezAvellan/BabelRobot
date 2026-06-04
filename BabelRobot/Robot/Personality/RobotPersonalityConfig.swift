@@ -77,19 +77,22 @@ struct ModelClassifierConfig: Equatable, Sendable {
     /// model is considered. Defaults to `false`.
     var isEnabled: Bool = false
 
-    /// Which tiny model to use, when enabled.
-    var model: Candidate = .smolLM2_135M
+    /// Which tiny model to use, when enabled. Defaults to Qwen 2.5 0.5B, which
+    /// reads multilingual emotional tone best at this size.
+    var model: Candidate = .qwen2_5_0_5B
 
     /// Sampling temperature for the classifier. Kept low for stable labels.
     var temperature: Double = 0.2
 
     /// Hard cap on generated tokens — the classifier only emits a tiny JSON
     /// object, so this stays small to bound latency.
-    var maxTokens: Int = 64
+    var maxTokens: Int = 48
 
     /// If the model hasn't produced a decision within this budget, the engine
-    /// falls back to the deterministic rules so the face never stalls.
-    var timeout: TimeInterval = 0.25
+    /// falls back to the deterministic rules so the face never stalls. The model
+    /// runs at end-of-turn (in parallel with nothing), so a generous budget is
+    /// fine — it only delays the post-answer reaction, never the answer itself.
+    var timeout: TimeInterval = 2.0
 
     /// Curated small models suitable for *emotion classification only*. None of
     /// these ever generate an assistant answer.

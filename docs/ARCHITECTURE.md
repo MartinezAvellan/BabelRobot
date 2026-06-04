@@ -145,25 +145,34 @@ RobotPersonalityEngine  ──▶  RobotEmotionClassifier  ──▶  RobotBehav
 Transient reactions auto-clear (scaled gently by intensity); sticky ones
 (`thinking`, `focused`, `sleeping`) hold until the next event.
 
-**Optional tiny model (architecture only).** `ModelEmotionClassifier` can defer
-to a small on-device model (SmolLM2 135M/360M or Qwen 2.5 0.5B) that classifies
-**emotion only** and emits one JSON object:
+**Optional tiny model (the Personality Model).** `ModelEmotionClassifier` defers
+to a small on-device model (**Qwen 2.5 0.5B** default, or SmolLM2 360M/135M) that
+classifies **emotion only** and emits one JSON object:
 
 ```json
 { "emotion": "concerned", "intensity": 0.7, "animation": "headTilt", "durationMs": 2500 }
 ```
 
-It is gated three ways and **never runs by default**: the feature and the
-classifier must both be enabled, a host must supply an `EmotionModelRunner`, and
-it is consulted only for ambiguous, content-bearing moments. A strict timeout
-falls back to the rules so the face never stalls and response latency is never
-affected. No weights are downloaded or loaded unless explicitly wired.
+`PersonalityModelEngine` runs it as **its own MLX `ModelContainer`, separate from
+and coexisting with the main chat LLM** — adding only its small footprint
+(~0.15–0.45 GB), never sharing or unloading the main model. It is reached through
+the `EmotionModelRunner` seam, so the classifier stays MLX-free and testable.
 
-**Adoption.** Construct a `RobotPersonalityEngine`, set
-`config.isEnabled = true`, forward the same lifecycle events the app already
-emits (`generationStarted()`, `firstTokenReceived()`, `generationSucceeded()`,
-…), and read `displayState` for the face (with `onChange` to re-sync the
-animator) — mirroring the `RobotEmotionEngine` seam.
+Safeguards: it classifies emotion only (never answers); it is consulted **only at
+end-of-turn** (`generationSucceeded`/`generationFailed`), where the reaction is a
+transient and the model runs in parallel with nothing — so it **never delays the
+answer**; a strict timeout falls back to the rules; and it loads only when the
+**Lively personality** toggle is on (off by default), unloading when turned off.
+`PersonalityModelRegistry` is the curated model list (default Qwen 2.5 0.5B).
+
+**Integration.** `DesktopCompanionManager` owns a `RobotPersonalityEngine`
+(constructed with `ModelEmotionClassifier(runner: personalityModel)`) and a
+`PersonalityModelEngine`. It forwards the lifecycle moments it already observes,
+passes the conversation text at end-of-turn (for the model), and—while the
+personality is actively reacting—uses `displayState` in `refresh()` over the
+basic emotion layer, with the ambient base (cursor/sleep) still showing through
+at rest. The **Lively personality** toggle + **Personality model** picker live
+under *Settings ▸ Desktop companion*.
 
 ---
 

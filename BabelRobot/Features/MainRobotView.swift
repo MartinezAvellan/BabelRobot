@@ -608,10 +608,69 @@ struct MainRobotView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
+
+                    if companion.livelyPersonality {
+                        personalityModelControls
+                            .padding(.leading, 8)
+                    }
                 }
             }
         } label: {
             Label("Desktop companion", systemImage: "macwindow.on.rectangle")
+        }
+    }
+
+    /// Picker + load controls for the tiny Personality Model that classifies
+    /// emotions. Runs as its own MLX model, alongside the main chat LLM.
+    private var personalityModelControls: some View {
+        let model = companion.personalityModelSelection
+        let pm = companion.personalityModel
+        return VStack(alignment: .leading, spacing: 8) {
+            Picker("Personality model", selection: Binding(
+                get: { companion.personalityModelSelection },
+                set: { companion.personalityModelSelection = $0 }
+            )) {
+                ForEach(PersonalityModelRegistry.all) { m in
+                    Text("\(m.displayName)  —  \(m.sizeLabel)").tag(m)
+                }
+            }
+            .disabled(pm.isBusy)
+
+            HStack(spacing: 12) {
+                Label("RAM \(model.estimatedRAMText)", systemImage: "memorychip")
+                Label(model.downloadSizeText, systemImage: "arrow.down.circle")
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+
+            HStack(spacing: 10) {
+                switch pm.state {
+                case .loading:
+                    ProgressView(value: pm.loadProgress)
+                        .frame(width: 90)
+                    Text("Loading… \(Int(pm.loadProgress * 100))%")
+                        .font(.caption).foregroundStyle(.secondary)
+                case .loaded, .generating:
+                    Label("Loaded — emotions via the model", systemImage: "checkmark.seal.fill")
+                        .foregroundStyle(.green).font(.caption)
+                    Button("Unload") { companion.unloadPersonalityModel() }
+                        .buttonStyle(.link).font(.caption)
+                case .failed:
+                    Label("Load failed — using rules", systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange).font(.caption)
+                    Button("Retry") { companion.loadPersonalityModel() }
+                        .buttonStyle(.link).font(.caption)
+                default:
+                    Text("Not loaded — using deterministic rules until it loads.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Button("Load") { companion.loadPersonalityModel() }
+                        .buttonStyle(.link).font(.caption)
+                }
+            }
+
+            Text("A tiny model that classifies the robot's emotion only — it never answers for you. Falls back to rules instantly if it's slow.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
         }
     }
 

@@ -49,12 +49,29 @@ final class DesktopCompanionManager: NSObject, NSWindowDelegate {
 
     /// Opt-in: drive the face with the richer Robot Personality Engine (emotions,
     /// intensity, animations) instead of the basic emotion engine. Off → legacy
-    /// behavior, byte-for-byte.
+    /// behavior, byte-for-byte. On → also loads the Personality Model so emotions
+    /// are classified by the tiny LLM (with a rules fallback).
     var livelyPersonality: Bool {
         didSet {
             persist()
-            personality.config = livelyPersonality ? .playful : .default
+            applyPersonalityConfig()
+            if livelyPersonality {
+                if !personalityModel.isLoaded { loadPersonalityModel() }
+            } else {
+                unloadPersonalityModel()
+            }
             refresh()
+        }
+    }
+
+    /// The Personality Model used to classify emotions. Persisted; reloads if a
+    /// different one is picked while resident.
+    var personalityModelSelection: LocalModelConfig {
+        didSet {
+            guard personalityModelSelection != oldValue else { return }
+            persist()
+            personalityModel.selectedModel = personalityModelSelection
+            if livelyPersonality { loadPersonalityModel() }
         }
     }
 
@@ -67,9 +84,13 @@ final class DesktopCompanionManager: NSObject, NSWindowDelegate {
     let cursor = CursorTrackingService()
     let behavior = RobotBehaviorEngine()
     let emotion = RobotEmotionEngine()
+    /// The tiny on-device model that classifies emotion (Personality Model). A
+    /// separate MLX container from the main chat LLM — they coexist in memory.
+    let personalityModel = PersonalityModelEngine()
     /// Richer, opt-in face driver (see `livelyPersonality`). When off it does
-    /// nothing and the basic `emotion` engine drives the face as before.
-    let personality = RobotPersonalityEngine()
+    /// nothing and the basic `emotion` engine drives the face as before. When on,
+    /// it consults `personalityModel` at end-of-turn, falling back to rules.
+    let personality: RobotPersonalityEngine
 
     /// The fused face the companion view renders.
     private(set) var faceState: RobotFaceState = .idle
@@ -130,6 +151,7 @@ final class DesktopCompanionManager: NSObject, NSWindowDelegate {
     private let contentSize = CGSize(width: 240, height: 240)
 
     private var aiStateProvider: (() -> RobotFaceState)?
+    private var aiContextProvider: (() -> (user: String?, assistant: String?))?
 
     private enum Key {
         static let enabled = "companion.enabled"
@@ -138,6 +160,7 @@ final class DesktopCompanionManager: NSObject, NSWindowDelegate {
         static let sleep = "companion.sleepWhenIdle"
         static let onTop = "companion.alwaysOnTop"
         static let lively = "companion.livelyPersonality"
+        static let personalityModel = "companion.personalityModelId"
         static let originX = "companion.originX"
         static let originY = "companion.originY"
     }
@@ -153,25 +176,66 @@ final class DesktopCompanionManager: NSObject, NSWindowDelegate {
         sleepWhenIdle = d.object(forKey: Key.sleep) as? Bool ?? true
         alwaysOnTop = d.object(forKey: Key.onTop) as? Bool ?? true
         livelyPersonality = d.object(forKey: Key.lively) as? Bool ?? false
+        personalityModelSelection = (d.string(forKey: Key.personalityModel)
+            .flatMap(PersonalityModelRegistry.model(withId:))) ?? PersonalityModelRegistry.default
+
+        // The face engine consults the tiny model at end-of-turn, falling back
+        // to deterministic rules whenever the model is off / not loaded / slow.
+        personality = RobotPersonalityEngine(
+            classifier: ModelEmotionClassifier(runner: personalityModel)
+        )
         super.init()
 
+        personalityModel.selectedModel = personalityModelSelection
         behavior.followCursor = followCursor
         behavior.sleepWhenIdle = sleepWhenIdle
         behavior.onChange = { [weak self] in self?.refresh() }
         emotion.onChange = { [weak self] in self?.refresh() }
-        personality.config = livelyPersonality ? .playful : .default
+        applyPersonalityConfig()
         personality.onChange = { [weak self] in self?.refresh() }
         cursor.onTick = { [weak self] mouse in self?.handleTick(mouse) }
 
         if enabled { applyEnabled() }
+        // Bring the Personality Model resident if the feature was left on.
+        if livelyPersonality { loadPersonalityModel() }
+    }
+
+    // MARK: - Personality Model lifecycle
+
+    /// Build the engine config from the current toggles and apply it.
+    private func applyPersonalityConfig() {
+        guard livelyPersonality else { personality.config = .default; return }
+        var cfg = RobotPersonalityConfig.playful
+        cfg.classifier.isEnabled = true           // consult the tiny LLM at end-of-turn
+        personality.config = cfg
+    }
+
+    /// Load the selected Personality Model (its own MLX container, alongside the
+    /// main chat LLM). Safe to call repeatedly.
+    func loadPersonalityModel() {
+        let model = personalityModelSelection
+        Task { await personalityModel.load(model) }
+    }
+
+    /// Free the Personality Model's memory.
+    func unloadPersonalityModel() {
+        Task { await personalityModel.unload() }
     }
 
     // MARK: - AI bridge
 
     /// Observe the assistant's face state and translate transitions into
     /// companion emotions. Re-arms itself after every change.
-    func connectAI(stateProvider: @escaping () -> RobotFaceState) {
+    ///
+    /// `contextProvider` (optional) supplies the latest user prompt and assistant
+    /// response so the Personality Model can read the conversation's emotional
+    /// tone at end-of-turn. It is read only for classification, never to answer.
+    func connectAI(
+        stateProvider: @escaping () -> RobotFaceState,
+        contextProvider: (() -> (user: String?, assistant: String?))? = nil
+    ) {
         aiStateProvider = stateProvider
+        aiContextProvider = contextProvider
         observeAI()
     }
 
@@ -188,16 +252,22 @@ final class DesktopCompanionManager: NSObject, NSWindowDelegate {
     private func handleAIState(_ state: RobotFaceState) {
         // The basic emotion engine always runs (it's the fallback when the
         // personality engine is off). The personality engine is fed the same
-        // moments; it no-ops while disabled.
+        // moments; it no-ops while disabled. At end-of-turn we also pass the
+        // conversation text so the Personality Model can read the tone.
+        let ctx = aiContextProvider?()
         switch state {
         case .thinking, .loadingModel:
             emotion.prompted();            personality.generationStarted();   behavior.noteInteraction()
         case .speaking:
             emotion.speaking();            personality.firstTokenReceived();   behavior.noteInteraction()
         case .happy:
-            emotion.generationSucceeded(); personality.generationSucceeded();  behavior.noteInteraction()
+            emotion.generationSucceeded()
+            personality.handle(.generationSucceeded, userInput: ctx?.user, assistantResponse: ctx?.assistant)
+            behavior.noteInteraction()
         case .error:
-            emotion.generationFailed();    personality.generationFailed();     behavior.noteInteraction()
+            emotion.generationFailed()
+            personality.handle(.generationFailed, userInput: ctx?.user, assistantResponse: ctx?.assistant)
+            behavior.noteInteraction()
         case .warning:
             emotion.warn();                personality.warn();                 behavior.noteInteraction()
         default:
@@ -273,6 +343,7 @@ final class DesktopCompanionManager: NSObject, NSWindowDelegate {
         animator.stop()
         emotion.reset()
         personality.reset()
+        personalityModel.shutdown()
         panel?.close()
         panel = nil
     }
@@ -371,6 +442,7 @@ final class DesktopCompanionManager: NSObject, NSWindowDelegate {
         d.set(sleepWhenIdle, forKey: Key.sleep)
         d.set(alwaysOnTop, forKey: Key.onTop)
         d.set(livelyPersonality, forKey: Key.lively)
+        d.set(personalityModelSelection.id, forKey: Key.personalityModel)
     }
 
     // MARK: - NSWindowDelegate

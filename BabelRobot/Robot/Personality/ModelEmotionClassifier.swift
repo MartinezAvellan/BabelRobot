@@ -81,12 +81,18 @@ struct ModelEmotionClassifier: RobotEmotionClassifier {
         return ruleDecision
     }
 
-    /// Only consult the model when the user's words carry nuance the rules can't
-    /// fully capture (long, content-bearing prompts).
+    /// Consult the model at end-of-turn, where the reaction is a transient that
+    /// won't fight a sticky state (thinking/speaking) and we have both the user's
+    /// message and the robot's reply to read the emotional tone from. Other
+    /// moments are already well served by the rules at zero cost.
     private func shouldConsultModel(for input: RobotPersonalityInput) -> Bool {
-        guard input.event == .userPrompted || input.event == .generationSucceeded else { return false }
-        let words = (input.userInput ?? "").split(whereSeparator: { $0.isWhitespace })
-        return words.count >= 4
+        switch input.event {
+        case .generationSucceeded, .generationFailed:
+            let content = (input.userInput ?? "") + " " + (input.assistantResponse ?? "")
+            return content.split(whereSeparator: { $0.isWhitespace }).count >= 3
+        default:
+            return false
+        }
     }
 
     // MARK: - Prompt + strict JSON contract
