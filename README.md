@@ -91,6 +91,7 @@ BabelRobot is organized into clear engines, each with a single responsibility:
 - **UI Layer** — SwiftUI views, theme, and the main window.
 - **Robot Engine** — the face state machine, animator, and behavior/emotion engines.
 - **Personality Engine** — an opt-in layer (`Robot/Personality/`) that gives the robot a life of its own — emotions, intensity, and animations driven by lifecycle events, independent of the LLM and disabled by default. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#robot-personality-engine-opt-in).
+- **Awareness** — an opt-in layer (`Awareness/`) that gives the robot a sense of time, place and weather over the network (LLM stays local), with a transparent, on-disk activity log of every lookup.
 - **Model Engine** — model lifecycle, the registry, and the MLX inference path.
 - **Voice Engine** — microphone capture, speech recognition, and text-to-speech.
 - **Metrics Engine** — always-on system metrics (RAM, CPU, GPU, thermal).
@@ -125,6 +126,7 @@ lifecycle, memory management, and the voice/metrics pipelines in detail.
 
 - LLM inference is **100% local** (MLX). No cloud LLM calls, no API keys, no telemetry.
 - Model weights download from Hugging Face once for setup/cache, then run offline.
+- **World awareness is opt-in and off by default.** When enabled, the robot uses your location and the network for a sense of time, place and weather (Apple geocoding + the keyless [Open-Meteo](https://open-meteo.com) API). Your prompts and the LLM are never involved, and **every lookup is written to a transparent activity log** you can review (and reveal on disk) in the app.
 - Voice audio is fed straight into the recognizer and **never written to disk**; transcripts are not persisted.
 - Apple's Speech framework may use the system speech service depending on your settings; the app surfaces this and prefers on-device recognition when supported. The LLM never leaves your Mac.
 

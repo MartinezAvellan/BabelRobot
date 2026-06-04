@@ -62,6 +62,17 @@ final class LocalLLMManager {
         Answer clearly and concisely.
         """
 
+    /// Optional context (time / place / weather) injected into the system prompt
+    /// so answers can be situationally aware. Supplied by the Awareness layer;
+    /// `nil` keeps the assistant context-free. Never affects local-only inference.
+    var contextProvider: (() -> String?)?
+
+    /// The system prompt plus any live awareness context.
+    private var effectiveSystemPrompt: String {
+        guard let context = contextProvider?(), !context.isEmpty else { return systemPrompt }
+        return systemPrompt + "\n" + context
+    }
+
     // MARK: Observable state
 
     private(set) var state: LocalModelState = .unloaded
@@ -158,7 +169,7 @@ final class LocalLLMManager {
         // awaits the lower-QoS MLX `ModelContainer` actor is a priority
         // inversion (flagged as "Hang Risk"). The container is Sendable and we
         // hop back to the main actor only to deliver each chunk.
-        let systemPrompt = self.systemPrompt
+        let systemPrompt = self.effectiveSystemPrompt
         let work = Task.detached(priority: .userInitiated) { () -> GenerationOutcome in
             var output = ""
             var info: GenerateCompletionInfo?

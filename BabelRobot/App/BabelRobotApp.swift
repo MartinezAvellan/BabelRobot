@@ -15,12 +15,13 @@ struct BabelRobotApp: App {
     @State private var companion = DesktopCompanionManager()
     @State private var voice = VoiceConversationManager()
     @State private var screenshot = ScreenshotUnderstandingViewModel()
+    @State private var awareness = RobotAwarenessService()
 
     var body: some Scene {
         WindowGroup {
             MainRobotView(viewModel: viewModel, theme: theme,
                           companion: companion, voice: voice,
-                          screenshot: screenshot)
+                          screenshot: screenshot, awareness: awareness)
                 .preferredColorScheme(theme.preferredColorScheme)
                 .onAppear { wireUp() }
                 .onReceive(NotificationCenter.default.publisher(
@@ -91,6 +92,11 @@ struct BabelRobotApp: App {
              viewModel.manager.lastTokensPerSecond,
              viewModel.selectedModel.displayName)
         }
+
+        // Give the local assistant a sense of time / place / weather (opt-in).
+        // The Awareness layer is the only network access for the robot's own
+        // knowledge; LLM inference stays fully local.
+        viewModel.manager.contextProvider = { [awareness] in awareness.systemContextLine }
 
         // Auto-download / load the default model (Llama 3.1 8B) on launch.
         viewModel.autoLoadDefaultIfNeeded()

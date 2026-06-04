@@ -8,6 +8,7 @@
 
 import SwiftUI
 import AVFoundation
+import CoreLocation
 
 struct MainRobotView: View {
     @Bindable var viewModel: RobotAssistantViewModel
@@ -15,6 +16,7 @@ struct MainRobotView: View {
     @Bindable var companion: DesktopCompanionManager
     @Bindable var voice: VoiceConversationManager
     @Bindable var screenshot: ScreenshotUnderstandingViewModel
+    @Bindable var awareness: RobotAwarenessService
     @FocusState private var promptFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var colorScheme
@@ -123,6 +125,7 @@ struct MainRobotView: View {
             promptSection
             responseSection
             settingsSection
+            awarenessSection
         }
     }
 
@@ -714,6 +717,108 @@ struct MainRobotView: View {
         }
     }
 
+    // MARK: Awareness (time / location / weather + activity log)
+
+    private var awarenessSection: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 12) {
+                Toggle(isOn: $awareness.enabled) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("World awareness")
+                        Text("Lets the robot sense time, place and weather (uses the network and your location). LLM answers still run locally. Every lookup is logged below.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .toggleStyle(.switch)
+
+                if awareness.enabled {
+                    Divider()
+                    awarenessContext
+                    Divider()
+                    awarenessLog
+                }
+            }
+        } label: {
+            Label("Awareness", systemImage: "globe")
+        }
+    }
+
+    /// Current sensed context + a manual refresh.
+    private var awarenessContext: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(awareness.contextSummary)
+                    .font(.callout)
+                    .foregroundStyle(.primary)
+                Spacer()
+                Button { awareness.refresh() } label: {
+                    Label("Refresh", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.borderless)
+            }
+            if awareness.authorization == .denied || awareness.authorization == .restricted {
+                Label("Location permission is off — enable it in System Settings ▸ Privacy ▸ Location Services for place & weather.",
+                      systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+        }
+    }
+
+    /// The transparent activity log of every external lookup.
+    private var awarenessLog: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Activity log")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if let url = awareness.log.logFileURL {
+                    Button {
+                        NSWorkspace.shared.activateFileViewerSelecting([url])
+                    } label: {
+                        Label("Reveal log", systemImage: "doc.text.magnifyingglass")
+                    }
+                    .buttonStyle(.borderless)
+                    .font(.caption)
+                }
+                Button { awareness.log.clear() } label: {
+                    Label("Clear", systemImage: "trash")
+                }
+                .buttonStyle(.borderless)
+                .font(.caption)
+            }
+
+            if awareness.log.entries.isEmpty {
+                Text("No lookups yet.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(awareness.log.entries) { entry in
+                            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                Image(systemName: entry.category.symbol)
+                                    .foregroundStyle(entry.category.isNetwork ? .blue : .secondary)
+                                    .frame(width: 16)
+                                Text(entry.timeText)
+                                    .font(.caption2.monospaced())
+                                    .foregroundStyle(.tertiary)
+                                Text(entry.summary)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                Spacer()
+                            }
+                        }
+                    }
+                }
+                .frame(maxHeight: 160)
+            }
+        }
+    }
+
 }
 
 #Preview {
@@ -722,5 +827,6 @@ struct MainRobotView: View {
         theme: ThemeManager(),
         companion: DesktopCompanionManager(),
         voice: VoiceConversationManager(),
-        screenshot: ScreenshotUnderstandingViewModel())
+        screenshot: ScreenshotUnderstandingViewModel(),
+        awareness: RobotAwarenessService())
 }
