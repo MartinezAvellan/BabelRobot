@@ -56,7 +56,6 @@ final class RobotAwarenessService: NSObject, CLLocationManagerDelegate {
     private let locationManager = CLLocationManager()
     private let monitor = NWPathMonitor()
     private let monitorQueue = DispatchQueue(label: "robot.awareness.network")
-    private var geocoder: CLGeocoder?
     private var startedMonitor = false
 
     // MARK: - Init
@@ -151,10 +150,10 @@ final class RobotAwarenessService: NSObject, CLLocationManagerDelegate {
     private func startNetworkMonitor() {
         guard !startedMonitor else { return }
         startedMonitor = true
-        monitor.pathUpdateHandler = { [weak self] path in
+        monitor.pathUpdateHandler = { path in
             let online = path.status == .satisfied
             let type = Self.describe(path)
-            Task { @MainActor in self?.applyNetwork(online: online, type: type) }
+            Task { @MainActor [weak self] in self?.applyNetwork(online: online, type: type) }
         }
         monitor.start(queue: monitorQueue)
     }
@@ -189,12 +188,15 @@ final class RobotAwarenessService: NSObject, CLLocationManagerDelegate {
     nonisolated func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard let loc = locations.last else { return }
         MainActor.assumeIsolated {
-            coordinate = loc.coordinate
+            let coord = loc.coordinate
+            coordinate = coord
             lastRefresh = Date()
-            let coordText = String(format: "%.3f, %.3f", loc.coordinate.latitude, loc.coordinate.longitude)
-            log.record(.location, "Location fix", detail: coordText)
-            reverseGeocode(loc)
-            Task { await fetchWeather(for: loc.coordinate) }
+            log.record(.location, "Location fix",
+                       detail: String(format: "%.3f, %.3f", coord.latitude, coord.longitude))
+            Task {
+                await fetchPlace(for: coord)
+                await fetchWeather(for: coord)
+            }
         }
     }
 
@@ -204,26 +206,37 @@ final class RobotAwarenessService: NSObject, CLLocationManagerDelegate {
         }
     }
 
-    // MARK: - Reverse geocoding
+    // MARK: - Reverse geocoding (keyless HTTP — avoids the deprecated CLGeocoder)
 
-    private func reverseGeocode(_ location: CLLocation) {
-        let geocoder = CLGeocoder()
-        self.geocoder = geocoder
-        log.record(.geocode, "Reverse-geocoding the fix (Apple)")
-        geocoder.reverseGeocodeLocation(location) { [weak self] placemarks, error in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                if let p = placemarks?.first {
-                    let city = p.locality ?? p.subAdministrativeArea ?? p.administrativeArea
-                    let country = p.country
-                    let name = [city, country].compactMap { $0 }.joined(separator: ", ")
-                    self.place = name.isEmpty ? nil : name
-                    self.log.record(.geocode, self.place ?? "Unknown place")
-                } else {
-                    self.log.record(.geocode, "Geocode failed", detail: error?.localizedDescription)
-                }
-            }
+    private func fetchPlace(for coord: CLLocationCoordinate2D) async {
+        var comps = URLComponents(string: "https://api.bigdatacloud.net/data/reverse-geocode-client")
+        comps?.queryItems = [
+            .init(name: "latitude", value: String(format: "%.3f", coord.latitude)),
+            .init(name: "longitude", value: String(format: "%.3f", coord.longitude)),
+            .init(name: "localityLanguage", value: "en"),
+        ]
+        guard let url = comps?.url else { return }
+        log.record(.geocode, "GET api.bigdatacloud.net", detail: url.absoluteString)
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            let decoded = try JSONDecoder().decode(ReverseGeocode.self, from: data)
+            let city = [decoded.city, decoded.locality, decoded.principalSubdivision]
+                .compactMap { $0 }.first { !$0.isEmpty }
+            let name = [city, decoded.countryName]
+                .compactMap { ($0?.isEmpty == false) ? $0 : nil }
+                .joined(separator: ", ")
+            place = name.isEmpty ? nil : name
+            log.record(.geocode, place ?? "Unknown place")
+        } catch {
+            log.record(.geocode, "Geocode failed", detail: error.localizedDescription)
         }
+    }
+
+    private struct ReverseGeocode: Decodable {
+        let city: String?
+        let locality: String?
+        let principalSubdivision: String?
+        let countryName: String?
     }
 
     // MARK: - Weather (Open-Meteo, no API key)
