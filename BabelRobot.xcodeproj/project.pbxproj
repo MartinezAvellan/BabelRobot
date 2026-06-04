@@ -288,6 +288,7 @@
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSLocationUsageDescription = "BabelRobot uses your location only to give the robot a sense of place (city, weather). It stays on this Mac; every lookup is logged in the app.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "BabelRobot uses the microphone so you can talk to the local AI assistant.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "BabelRobot transcribes your speech so the local AI assistant can respond. LLM responses stay on this Mac.";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -323,6 +324,7 @@
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSLocationUsageDescription = "BabelRobot uses your location only to give the robot a sense of place (city, weather). It stays on this Mac; every lookup is logged in the app.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "BabelRobot uses the microphone so you can talk to the local AI assistant.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "BabelRobot transcribes your speech so the local AI assistant can respond. LLM responses stay on this Mac.";
 				LD_RUNPATH_SEARCH_PATHS = (

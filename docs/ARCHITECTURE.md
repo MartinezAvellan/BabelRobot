@@ -91,6 +91,91 @@ red, overriding mood.
 
 ---
 
+## Robot Personality Engine (opt-in)
+
+`Robot/Personality/` is an additive, **opt-in** layer that gives the robot a
+life of its own, fully decoupled from the main LLM. It never produces an answer
+for the user — it only decides how the robot should *feel* and *move*. It is
+disabled by default (`RobotPersonalityConfig.isEnabled == false`), so the
+shipping `voice ▸ emotion ▸ behavior` fusion above is unchanged unless a host
+adopts it.
+
+```
+events (prompt/first-token/done/failed/idle…)
+        │
+        ▼
+RobotPersonalityEngine  ──▶  RobotEmotionClassifier  ──▶  RobotBehaviorDecision
+  (@MainActor @Observable)     │                            { emotion, intensity,
+        │                      ├─ DeterministicEmotionClassifier   animation, durationMs }
+        │ displayState         │     (rules — always on)            │
+        ▼                      └─ ModelEmotionClassifier            ▼ faceState (derived)
+   RobotFaceState                 (optional, disabled by default)  renderer
+```
+
+**Pieces**
+
+- `RobotEmotionState` — a richer emotional vocabulary (`neutral`, `happy`,
+  `excited`, `curious`, `thinking`, `confused`, `concerned`, `error`,
+  `sleeping`, `focused`, `surprised`). Each projects onto a concrete
+  `RobotFaceState` the existing renderer already draws.
+- `RobotAnimationIntent` — the motion vocabulary (`blink`, `lookAtCursor`,
+  `headTilt`, `pulse`, `smile`, `mouthSpeak`, `confusedLook`, `sleepBreathing`,
+  `loadingPulse`, `errorShake`) with sensible default durations.
+- `RobotBehaviorDecision` — the single output (emotion + intensity + animation +
+  hold duration). `Codable` in exactly the classifier's JSON shape.
+- `RobotPersonalityInput` — the pure context (event, user input, assistant
+  response, current state, task type) the engine reasons over.
+- `RobotPersonalityConfig` — traits (expressiveness, reactivity, sleep delay)
+  plus the disabled-by-default model-classifier settings.
+- `RobotEmotionClassifier` — the strategy boundary, with two implementations.
+
+**Deterministic first.** `DeterministicEmotionClassifier` is a small, dependency
+-free rule set and is always sufficient on its own:
+
+| Trigger | Reaction |
+| --- | --- |
+| `generationStarted` | `thinking` (or `focused` for reasoning tasks) |
+| `firstTokenReceived` | `focused` + `mouthSpeak` (the robot "talks") |
+| `generationSucceeded` | `happy` ~2 s (`excited` if the user sounded upbeat) |
+| `generationFailed` | `confused`, or `error` for a hard/technical failure |
+| user says "thank you" | `happy` (EN/PT/ES cues) |
+| user asks a question | `curious` → `thinking` |
+| idle ~5 min | `sleeping` |
+
+Transient reactions auto-clear (scaled gently by intensity); sticky ones
+(`thinking`, `focused`, `sleeping`) hold until the next event.
+
+**Optional tiny model (the Personality Model).** `ModelEmotionClassifier` defers
+to a small on-device model (**Qwen 2.5 0.5B** default, or SmolLM2 360M/135M) that
+classifies **emotion only** and emits one JSON object:
+
+```json
+{ "emotion": "concerned", "intensity": 0.7, "animation": "headTilt", "durationMs": 2500 }
+```
+
+`PersonalityModelEngine` runs it as **its own MLX `ModelContainer`, separate from
+and coexisting with the main chat LLM** — adding only its small footprint
+(~0.15–0.45 GB), never sharing or unloading the main model. It is reached through
+the `EmotionModelRunner` seam, so the classifier stays MLX-free and testable.
+
+Safeguards: it classifies emotion only (never answers); it is consulted **only at
+end-of-turn** (`generationSucceeded`/`generationFailed`), where the reaction is a
+transient and the model runs in parallel with nothing — so it **never delays the
+answer**; a strict timeout falls back to the rules; and it loads only when the
+**Lively personality** toggle is on (off by default), unloading when turned off.
+`PersonalityModelRegistry` is the curated model list (default Qwen 2.5 0.5B).
+
+**Integration.** `DesktopCompanionManager` owns a `RobotPersonalityEngine`
+(constructed with `ModelEmotionClassifier(runner: personalityModel)`) and a
+`PersonalityModelEngine`. It forwards the lifecycle moments it already observes,
+passes the conversation text at end-of-turn (for the model), and—while the
+personality is actively reacting—uses `displayState` in `refresh()` over the
+basic emotion layer, with the ambient base (cursor/sleep) still showing through
+at rest. The **Lively personality** toggle + **Personality model** picker live
+under *Settings ▸ Desktop companion*.
+
+---
+
 ## Model lifecycle
 
 `LocalLLMManager` (`@MainActor`) owns a strict state machine. Only one model is

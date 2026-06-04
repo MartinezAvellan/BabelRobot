@@ -58,15 +58,36 @@ final class LocalLLMManager {
     private let generationTimeout: TimeInterval = 60
 
     private let systemPrompt = """
-        You are Babel Robot, a friendly offline AI assistant running locally on this Mac. \
+        You are Babel Robot, a friendly AI assistant running locally on this Mac. \
+        You may be given live context (date, location, weather) and web search \
+        results below. When such information is provided, use it to answer with \
+        up-to-date facts and do NOT say you are offline or lack internet access — \
+        the app has already fetched what you need. Cite sources when helpful. \
         Answer clearly and concisely.
         """
+
+    /// Optional context (time / place / weather) injected into the system prompt
+    /// so answers can be situationally aware. Supplied by the Awareness layer;
+    /// `nil` keeps the assistant context-free. Never affects local-only inference.
+    var contextProvider: (() -> String?)?
+
+    /// The system prompt plus any live awareness context.
+    private var effectiveSystemPrompt: String {
+        guard let context = contextProvider?(), !context.isEmpty else { return systemPrompt }
+        return systemPrompt + "\n" + context
+    }
 
     // MARK: Observable state
 
     private(set) var state: LocalModelState = .unloaded
-    /// 0...1 progress during loading.
+    /// 0...1 download progress while fetching weights from Hugging Face.
     private(set) var loadProgress: Double = 0
+    /// True once the download has finished and the weights are being mapped into
+    /// memory (the phase after the download bar, with no fine-grained progress).
+    private(set) var isMappingIntoMemory = false
+    /// Set when the user cancels an in-progress load; the completed container is
+    /// then discarded rather than becoming resident.
+    private var loadCancelled = false
 
     // Last completed generation stats (for the metrics panel).
     private(set) var lastTokensPerSecond: Double?
@@ -99,6 +120,8 @@ final class LocalLLMManager {
 
         guard transition(to: .loading(modelId: model.id)) else { return }
         loadProgress = 0
+        isMappingIntoMemory = false
+        loadCancelled = false
 
         var record = BenchmarkRecord(modelId: model.id)
         record.ramBeforeLoad = LocalMemoryMonitor.snapshot()
@@ -107,12 +130,24 @@ final class LocalLLMManager {
         do {
             let loaded = try await withTimeout(seconds: loadTimeout, onTimeout: LocalLLMError.loadTimeout) {
                 try await LocalModelProvider.loadContainer(huggingFaceId: model.huggingFaceId) { frac in
-                    Task { @MainActor in self.loadProgress = frac }
+                    Task { @MainActor in
+                        guard !self.loadCancelled else { return }
+                        self.loadProgress = frac
+                        // Download finished → now mapping weights into memory.
+                        if frac >= 1.0 { self.isMappingIntoMemory = true }
+                    }
                 }
+            }
+
+            // The user cancelled while we were loading: discard the result.
+            if loadCancelled {
+                MLX.Memory.cacheLimit = 0
+                return
             }
 
             container = loaded
             loadProgress = 1
+            isMappingIntoMemory = false
             record.loadTime = Date().timeIntervalSince(start)
             record.ramAfterLoad = LocalMemoryMonitor.snapshot()
             record.success = true
@@ -120,6 +155,9 @@ final class LocalLLMManager {
 
             _ = transition(to: .loaded(modelId: model.id))
         } catch {
+            isMappingIntoMemory = false
+            // A user cancel already moved us to `.unloaded`; don't mark failed.
+            if loadCancelled { MLX.Memory.cacheLimit = 0; return }
             container = nil
             MLX.Memory.cacheLimit = 0  // clears the GPU/unified-memory cache (was GPU.set(cacheLimit:))
             record.success = false
@@ -130,6 +168,19 @@ final class LocalLLMManager {
             let friendly = (error as? LocalLLMError) ?? .loadFailed(underlying: String(describing: error))
             _ = transition(to: .failed(message: friendly.errorDescription ?? "Could not load the local model."))
         }
+    }
+
+    /// Cancel an in-progress load. The UI unlocks immediately; the underlying
+    /// download keeps filling the Hugging Face cache (so a later load is fast),
+    /// but its result is discarded rather than becoming resident.
+    func cancelLoad() {
+        guard case .loading = state else { return }
+        loadCancelled = true
+        loadProgress = 0
+        isMappingIntoMemory = false
+        container = nil
+        MLX.Memory.cacheLimit = 0
+        _ = transition(to: .unloaded)
     }
 
     // MARK: - Generation
@@ -158,7 +209,7 @@ final class LocalLLMManager {
         // awaits the lower-QoS MLX `ModelContainer` actor is a priority
         // inversion (flagged as "Hang Risk"). The container is Sendable and we
         // hop back to the main actor only to deliver each chunk.
-        let systemPrompt = self.systemPrompt
+        let systemPrompt = self.effectiveSystemPrompt
         let work = Task.detached(priority: .userInitiated) { () -> GenerationOutcome in
             var output = ""
             var info: GenerateCompletionInfo?

@@ -8,6 +8,7 @@
 
 import SwiftUI
 import AVFoundation
+import CoreLocation
 
 struct MainRobotView: View {
     @Bindable var viewModel: RobotAssistantViewModel
@@ -15,6 +16,8 @@ struct MainRobotView: View {
     @Bindable var companion: DesktopCompanionManager
     @Bindable var voice: VoiceConversationManager
     @Bindable var screenshot: ScreenshotUnderstandingViewModel
+    @Bindable var awareness: RobotAwarenessService
+    @Bindable var search: WebSearchService
     @FocusState private var promptFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var colorScheme
@@ -85,20 +88,8 @@ struct MainRobotView: View {
                 .fixedSize()
                 .accessibilityLabel("Appearance theme")
             }
-            if viewModel.faceState == .loadingModel {
-                VStack(spacing: 4) {
-                    ProgressView(value: viewModel.loadProgress)
-                        .progressViewStyle(.linear)
-                    Text("Downloading model… \(Int((viewModel.loadProgress * 100).rounded()))%")
-                        .font(.caption)
-                        .monospacedDigit()
-                        .foregroundStyle(.secondary)
-                }
-            }
             // Compact device metrics, right under the status / theme row.
             SystemMetricsView(metrics: viewModel.metricsMonitor.metrics)
-            // Local model controls, just below Device.
-            modelControls
         }
         .padding(.horizontal, 24)
         .padding(.top, 14)
@@ -120,10 +111,12 @@ struct MainRobotView: View {
     private var assistantTab: some View {
         tabScroll {
             offlineBadge
+            modelControls
             clipboardControls
             promptSection
             responseSection
             settingsSection
+            awarenessSection
         }
     }
 
@@ -227,14 +220,26 @@ struct MainRobotView: View {
 
                 modelDetails
 
+                if viewModel.isLoading { modelLoadProgress }
+
                 HStack {
-                    Button {
-                        promptFocused = false
-                        viewModel.loadSelectedModel()
-                    } label: {
-                        Label("Load Model", systemImage: "arrow.down.circle")
+                    if viewModel.isLoading {
+                        // While loading, the primary action becomes Cancel so the
+                        // user is never locked out (big models can take a while).
+                        Button(role: .cancel) {
+                            viewModel.cancelLoad()
+                        } label: {
+                            Label("Cancel", systemImage: "xmark.circle")
+                        }
+                    } else {
+                        Button {
+                            promptFocused = false
+                            viewModel.loadSelectedModel()
+                        } label: {
+                            Label("Load Model", systemImage: "arrow.down.circle")
+                        }
+                        .disabled(viewModel.isBusy)
                     }
-                    .disabled(viewModel.isBusy)
 
                     Button(role: .destructive) {
                         viewModel.unloadModel()
@@ -254,6 +259,29 @@ struct MainRobotView: View {
             }
         } label: {
             Label("Local model", systemImage: "cpu")
+        }
+    }
+
+    /// Two distinct phases: the **download** bar (determinate %, fetching weights
+    /// from Hugging Face) and the **load** spinner (mapping weights into memory).
+    @ViewBuilder
+    private var modelLoadProgress: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if viewModel.isMappingIntoMemory {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Loading into memory…")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                ProgressView(value: viewModel.loadProgress)
+                    .progressViewStyle(.linear)
+                Text("Downloading weights… \(Int((viewModel.loadProgress * 100).rounded()))%")
+                    .font(.caption)
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -599,10 +627,86 @@ struct MainRobotView: View {
                     Toggle("Follow cursor", isOn: $companion.followCursor)
                     Toggle("Sleep when idle", isOn: $companion.sleepWhenIdle)
                     Toggle("Always on top", isOn: $companion.alwaysOnTop)
+
+                    Toggle(isOn: $companion.livelyPersonality) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Lively personality")
+                            Text("Richer emotions and animations — the robot reacts with curiosity, focus, excitement, and more.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    if companion.livelyPersonality {
+                        personalityModelControls
+                            .padding(.leading, 8)
+                    }
                 }
             }
         } label: {
             Label("Desktop companion", systemImage: "macwindow.on.rectangle")
+        }
+    }
+
+    /// Picker + load controls for the tiny Personality Model that classifies
+    /// emotions. Runs as its own MLX model, alongside the main chat LLM.
+    private var personalityModelControls: some View {
+        let model = companion.personalityModelSelection
+        let pm = companion.personalityModel
+        return VStack(alignment: .leading, spacing: 8) {
+            Picker("Personality model", selection: Binding(
+                get: { companion.personalityModelSelection },
+                set: { companion.personalityModelSelection = $0 }
+            )) {
+                ForEach(PersonalityModelRegistry.all) { m in
+                    Text("\(m.displayName)  —  \(m.sizeLabel)").tag(m)
+                }
+            }
+            .disabled(pm.isBusy)
+
+            HStack(spacing: 12) {
+                Label("RAM \(model.estimatedRAMText)", systemImage: "memorychip")
+                Label(model.downloadSizeText, systemImage: "arrow.down.circle")
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+
+            HStack(spacing: 10) {
+                switch pm.state {
+                case .loading:
+                    ProgressView(value: pm.loadProgress)
+                        .frame(width: 90)
+                    Text("Loading… \(Int(pm.loadProgress * 100))%")
+                        .font(.caption).foregroundStyle(.secondary)
+                case .loaded, .generating:
+                    Label("Loaded — emotions via the model", systemImage: "checkmark.seal.fill")
+                        .foregroundStyle(.green).font(.caption)
+                    Button("Unload") { companion.unloadPersonalityModel() }
+                        .buttonStyle(.link).font(.caption)
+                case .failed:
+                    Label("Load failed — using rules", systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange).font(.caption)
+                    Button("Retry") { companion.loadPersonalityModel() }
+                        .buttonStyle(.link).font(.caption)
+                default:
+                    Text("Not loaded — using deterministic rules until it loads.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Button("Load") { companion.loadPersonalityModel() }
+                        .buttonStyle(.link).font(.caption)
+                }
+            }
+
+            if let raw = pm.lastRawOutput {
+                Text("Model said (#\(pm.classificationCount)): \(raw)")
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .textSelection(.enabled)
+            }
+
+            Text("A tiny model that classifies the robot's emotion only — it never answers for you. Falls back to rules instantly if it's slow.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
         }
     }
 
@@ -639,6 +743,118 @@ struct MainRobotView: View {
         }
     }
 
+    // MARK: Awareness (time / location / weather + activity log)
+
+    private var awarenessSection: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 12) {
+                Toggle(isOn: $awareness.enabled) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("World awareness")
+                        Text("Lets the robot sense time, place and weather (uses the network and your location). LLM answers still run locally. Every lookup is logged below.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .toggleStyle(.switch)
+
+                Toggle(isOn: $search.enabled) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Web search")
+                        Text("When a question needs fresh info (news, prices, “today”…), the robot searches the web and answers from the results. The LLM still runs locally; searches appear in the log.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .toggleStyle(.switch)
+
+                if awareness.enabled || search.enabled {
+                    Divider()
+                    if awareness.enabled { awarenessContext }
+                    if awareness.enabled { Divider() }
+                    awarenessLog
+                }
+            }
+        } label: {
+            Label("Awareness", systemImage: "globe")
+        }
+    }
+
+    /// Current sensed context + a manual refresh.
+    private var awarenessContext: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(awareness.contextSummary)
+                    .font(.callout)
+                    .foregroundStyle(.primary)
+                Spacer()
+                Button { awareness.refresh() } label: {
+                    Label("Refresh", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.borderless)
+            }
+            if awareness.authorization == .denied || awareness.authorization == .restricted {
+                Label("Location permission is off — enable it in System Settings ▸ Privacy ▸ Location Services for place & weather.",
+                      systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+        }
+    }
+
+    /// The transparent activity log of every external lookup.
+    private var awarenessLog: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Activity log")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if let url = awareness.log.logFileURL {
+                    Button {
+                        NSWorkspace.shared.activateFileViewerSelecting([url])
+                    } label: {
+                        Label("Reveal log", systemImage: "doc.text.magnifyingglass")
+                    }
+                    .buttonStyle(.borderless)
+                    .font(.caption)
+                }
+                Button { awareness.log.clear() } label: {
+                    Label("Clear", systemImage: "trash")
+                }
+                .buttonStyle(.borderless)
+                .font(.caption)
+            }
+
+            if awareness.log.entries.isEmpty {
+                Text("No lookups yet.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(awareness.log.entries) { entry in
+                            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                Image(systemName: entry.category.symbol)
+                                    .foregroundStyle(entry.category.isNetwork ? .blue : .secondary)
+                                    .frame(width: 16)
+                                Text(entry.timeText)
+                                    .font(.caption2.monospaced())
+                                    .foregroundStyle(.tertiary)
+                                Text(entry.summary)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                Spacer()
+                            }
+                        }
+                    }
+                }
+                .frame(maxHeight: 160)
+            }
+        }
+    }
+
 }
 
 #Preview {
@@ -647,5 +863,7 @@ struct MainRobotView: View {
         theme: ThemeManager(),
         companion: DesktopCompanionManager(),
         voice: VoiceConversationManager(),
-        screenshot: ScreenshotUnderstandingViewModel())
+        screenshot: ScreenshotUnderstandingViewModel(),
+        awareness: RobotAwarenessService(),
+        search: WebSearchService())
 }

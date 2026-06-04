@@ -15,12 +15,15 @@ struct BabelRobotApp: App {
     @State private var companion = DesktopCompanionManager()
     @State private var voice = VoiceConversationManager()
     @State private var screenshot = ScreenshotUnderstandingViewModel()
+    @State private var awareness = RobotAwarenessService()
+    @State private var search = WebSearchService()
 
     var body: some Scene {
         WindowGroup {
             MainRobotView(viewModel: viewModel, theme: theme,
                           companion: companion, voice: voice,
-                          screenshot: screenshot)
+                          screenshot: screenshot, awareness: awareness,
+                          search: search)
                 .preferredColorScheme(theme.preferredColorScheme)
                 .onAppear { wireUp() }
                 .onReceive(NotificationCenter.default.publisher(
@@ -36,8 +39,13 @@ struct BabelRobotApp: App {
 
     /// Connect the independent managers together (closures, no hard refs).
     private func wireUp() {
-        // Mirror the assistant's lifecycle onto the desktop companion.
-        companion.connectAI { viewModel.faceState }
+        // Mirror the assistant's lifecycle onto the desktop companion. The
+        // context closure lets the Personality Model read the conversation's tone
+        // at end-of-turn (classification only — never used to answer).
+        companion.connectAI(
+            stateProvider: { viewModel.faceState },
+            contextProvider: { (viewModel.promptText, viewModel.responseText) }
+        )
 
         // Clicking the robot starts a voice turn (when voice is enabled).
         companion.onActivate = { [voice] in voice.toggleTalk() }
@@ -86,6 +94,16 @@ struct BabelRobotApp: App {
              viewModel.manager.lastTokensPerSecond,
              viewModel.selectedModel.displayName)
         }
+
+        // Give the local assistant a sense of time / place / weather (opt-in).
+        // The Awareness layer is the only network access for the robot's own
+        // knowledge; LLM inference stays fully local.
+        viewModel.manager.contextProvider = { [awareness] in awareness.systemContextLine }
+
+        // Web search (opt-in): searches the web and feeds results to the LOCAL
+        // model as context. Searches are logged in the shared awareness log.
+        search.log = awareness.log
+        viewModel.retrieveContext = { [search] prompt in await search.contextBlock(for: prompt) }
 
         // Auto-download / load the default model (Llama 3.1 8B) on launch.
         viewModel.autoLoadDefaultIfNeeded()
