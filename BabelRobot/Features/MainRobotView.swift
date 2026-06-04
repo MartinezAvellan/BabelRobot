@@ -97,8 +97,6 @@ struct MainRobotView: View {
             }
             // Compact device metrics, right under the status / theme row.
             SystemMetricsView(metrics: viewModel.metricsMonitor.metrics)
-            // Local model controls, just below Device.
-            modelControls
         }
         .padding(.horizontal, 24)
         .padding(.top, 14)
@@ -120,6 +118,7 @@ struct MainRobotView: View {
     private var assistantTab: some View {
         tabScroll {
             offlineBadge
+            modelControls
             clipboardControls
             promptSection
             responseSection
