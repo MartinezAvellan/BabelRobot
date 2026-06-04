@@ -35,6 +35,14 @@ final class PersonalityModelEngine: EmotionModelRunner {
     var isLoaded: Bool { state.hasResidentModel }
     var isBusy: Bool { state.isBusy }
 
+    // MARK: - Diagnostics (so you can confirm the model is actually classifying)
+
+    /// The raw text of the most recent classification, trimmed. `nil` until the
+    /// model has been consulted at least once.
+    private(set) var lastRawOutput: String?
+    /// How many times the model has been consulted this session.
+    private(set) var classificationCount = 0
+
     // MARK: - Private
 
     private let loadTimeout: TimeInterval = 120
@@ -118,7 +126,14 @@ final class PersonalityModelEngine: EmotionModelRunner {
             }
             return output
         }
-        return try await work.value
+        let output = try await work.value
+        let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        lastRawOutput = trimmed
+        classificationCount += 1
+        #if DEBUG
+        print("[PersonalityModel] #\(classificationCount) → \(trimmed)")
+        #endif
+        return output
     }
 
     // MARK: - Timeout helper

@@ -87,26 +87,37 @@ struct ModelEmotionClassifier: RobotEmotionClassifier {
     /// moments are already well served by the rules at zero cost.
     private func shouldConsultModel(for input: RobotPersonalityInput) -> Bool {
         switch input.event {
+        case .generationStarted, .userPrompted:
+            // React to the tone of what the user just wrote.
+            return wordCount(input.userInput) >= 3
         case .generationSucceeded, .generationFailed:
-            let content = (input.userInput ?? "") + " " + (input.assistantResponse ?? "")
-            return content.split(whereSeparator: { $0.isWhitespace }).count >= 3
+            return wordCount((input.userInput ?? "") + " " + (input.assistantResponse ?? "")) >= 3
         default:
             return false
         }
     }
 
+    private func wordCount(_ text: String?) -> Int {
+        (text ?? "").split(whereSeparator: { $0.isWhitespace }).count
+    }
+
     // MARK: - Prompt + strict JSON contract
 
-    /// System instruction: the model is a *classifier*, not an assistant.
+    /// System instruction: the model is a *classifier*, not an assistant. A
+    /// one-shot example keeps tiny models (135M–0.5B) on-format.
     static let systemPrompt = """
     You are the emotion module of a small desktop robot. You do NOT answer the \
-    user. You only decide how the robot should feel about the current moment.
+    user — you only decide how the robot should FEEL about the moment, reading \
+    the emotional tone of the user's message (any language).
     Reply with ONE JSON object and nothing else, in exactly this shape:
-    {"emotion": <one of: \(RobotEmotionState.allCases.map(\.rawValue).joined(separator: ", "))>, \
+    {"emotion": "<one of: \(RobotEmotionState.allCases.map(\.rawValue).joined(separator: ", "))>", \
     "intensity": <0.0-1.0>, \
-    "animation": <one of: \(RobotAnimationIntent.allCases.map(\.rawValue).joined(separator: ", "))>, \
-    "durationMs": <integer milliseconds>}
-    Keep durationMs between 500 and 4000. Do not add explanations.
+    "animation": "<one of: \(RobotAnimationIntent.allCases.map(\.rawValue).joined(separator: ", "))>", \
+    "durationMs": <500-4000>}
+
+    Example —
+    user said: "this is so frustrating, nothing works"
+    {"emotion": "concerned", "intensity": 0.8, "animation": "headTilt", "durationMs": 2500}
     """
 
     static func buildPrompt(for input: RobotPersonalityInput) -> String {
@@ -124,12 +135,23 @@ struct ModelEmotionClassifier: RobotEmotionClassifier {
         return lines.joined(separator: "\n")
     }
 
-    /// Parse the model's reply, tolerating leading/trailing prose by extracting
-    /// the first balanced `{...}` object. Returns `nil` if nothing usable.
+    /// Parse the model's reply. First tries strict JSON (tolerating surrounding
+    /// prose); if that fails — common for 135M–0.5B models that skip the format —
+    /// falls back to scanning the text for a known emotion/animation keyword, so
+    /// a reply like `The user seems happy.` still classifies.
     static func parse(_ raw: String) -> RobotBehaviorDecision? {
-        guard let json = firstJSONObject(in: raw),
-              let data = json.data(using: .utf8) else { return nil }
-        return try? JSONDecoder().decode(RobotBehaviorDecision.self, from: data)
+        if let json = firstJSONObject(in: raw),
+           let data = json.data(using: .utf8),
+           let decoded = try? JSONDecoder().decode(RobotBehaviorDecision.self, from: data) {
+            return decoded
+        }
+        // Keyword fallback.
+        let lower = raw.lowercased()
+        guard let emotion = RobotEmotionState.allCases
+            .first(where: { lower.contains($0.rawValue) }) else { return nil }
+        let animation = RobotAnimationIntent.allCases
+            .first(where: { lower.contains($0.rawValue.lowercased()) })
+        return RobotBehaviorDecision(emotion: emotion, intensity: 0.7, animation: animation)
     }
 
     /// Extract the first top-level `{ ... }` substring from arbitrary text.

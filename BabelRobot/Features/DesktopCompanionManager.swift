@@ -257,7 +257,11 @@ final class DesktopCompanionManager: NSObject, NSWindowDelegate {
         let ctx = aiContextProvider?()
         switch state {
         case .thinking, .loadingModel:
-            emotion.prompted();            personality.generationStarted();   behavior.noteInteraction()
+            emotion.prompted()
+            // Pass the prompt so the model can read the user's tone while the
+            // robot "thinks"; the reaction is a brief transient over thinking.
+            personality.handle(.generationStarted, userInput: ctx?.user)
+            behavior.noteInteraction()
         case .speaking:
             emotion.speaking();            personality.firstTokenReceived();   behavior.noteInteraction()
         case .happy:

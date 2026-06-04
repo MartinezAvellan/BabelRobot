@@ -668,6 +668,14 @@ struct MainRobotView: View {
                 }
             }
 
+            if let raw = pm.lastRawOutput {
+                Text("Model said (#\(pm.classificationCount)): \(raw)")
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .textSelection(.enabled)
+            }
+
             Text("A tiny model that classifies the robot's emotion only — it never answers for you. Falls back to rules instantly if it's slow.")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
