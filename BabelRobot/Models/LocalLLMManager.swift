@@ -58,7 +58,11 @@ final class LocalLLMManager {
     private let generationTimeout: TimeInterval = 60
 
     private let systemPrompt = """
-        You are Babel Robot, a friendly offline AI assistant running locally on this Mac. \
+        You are Babel Robot, a friendly AI assistant running locally on this Mac. \
+        You may be given live context (date, location, weather) and web search \
+        results below. When such information is provided, use it to answer with \
+        up-to-date facts and do NOT say you are offline or lack internet access — \
+        the app has already fetched what you need. Cite sources when helpful. \
         Answer clearly and concisely.
         """
 

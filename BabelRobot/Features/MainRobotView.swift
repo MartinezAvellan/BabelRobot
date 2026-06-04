@@ -17,6 +17,7 @@ struct MainRobotView: View {
     @Bindable var voice: VoiceConversationManager
     @Bindable var screenshot: ScreenshotUnderstandingViewModel
     @Bindable var awareness: RobotAwarenessService
+    @Bindable var search: WebSearchService
     @FocusState private var promptFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var colorScheme
@@ -732,10 +733,20 @@ struct MainRobotView: View {
                 }
                 .toggleStyle(.switch)
 
-                if awareness.enabled {
+                Toggle(isOn: $search.enabled) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Web search")
+                        Text("When a question needs fresh info (news, prices, “today”…), the robot searches the web and answers from the results. The LLM still runs locally; searches appear in the log.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .toggleStyle(.switch)
+
+                if awareness.enabled || search.enabled {
                     Divider()
-                    awarenessContext
-                    Divider()
+                    if awareness.enabled { awarenessContext }
+                    if awareness.enabled { Divider() }
                     awarenessLog
                 }
             }
@@ -828,5 +839,6 @@ struct MainRobotView: View {
         companion: DesktopCompanionManager(),
         voice: VoiceConversationManager(),
         screenshot: ScreenshotUnderstandingViewModel(),
-        awareness: RobotAwarenessService())
+        awareness: RobotAwarenessService(),
+        search: WebSearchService())
 }

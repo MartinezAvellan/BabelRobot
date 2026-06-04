@@ -28,6 +28,7 @@ struct AwarenessLogEntry: Identifiable, Sendable, Equatable {
         case network    // connectivity change
         case permission // an authorization change
         case time       // a time/locale read (local, no network)
+        case search     // a web search the robot ran to answer a question
 
         var symbol: String {
             switch self {
@@ -37,13 +38,14 @@ struct AwarenessLogEntry: Identifiable, Sendable, Equatable {
             case .network:    return "wifi"
             case .permission: return "lock.shield"
             case .time:       return "clock.fill"
+            case .search:     return "magnifyingglass"
             }
         }
 
         /// Whether this category involved leaving the Mac (a network request).
         var isNetwork: Bool {
             switch self {
-            case .geocode, .weather: return true
+            case .geocode, .weather, .search: return true
             case .location, .network, .permission, .time: return false
             }
         }

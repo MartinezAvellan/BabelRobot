@@ -16,12 +16,14 @@ struct BabelRobotApp: App {
     @State private var voice = VoiceConversationManager()
     @State private var screenshot = ScreenshotUnderstandingViewModel()
     @State private var awareness = RobotAwarenessService()
+    @State private var search = WebSearchService()
 
     var body: some Scene {
         WindowGroup {
             MainRobotView(viewModel: viewModel, theme: theme,
                           companion: companion, voice: voice,
-                          screenshot: screenshot, awareness: awareness)
+                          screenshot: screenshot, awareness: awareness,
+                          search: search)
                 .preferredColorScheme(theme.preferredColorScheme)
                 .onAppear { wireUp() }
                 .onReceive(NotificationCenter.default.publisher(
@@ -97,6 +99,11 @@ struct BabelRobotApp: App {
         // The Awareness layer is the only network access for the robot's own
         // knowledge; LLM inference stays fully local.
         viewModel.manager.contextProvider = { [awareness] in awareness.systemContextLine }
+
+        // Web search (opt-in): searches the web and feeds results to the LOCAL
+        // model as context. Searches are logged in the shared awareness log.
+        search.log = awareness.log
+        viewModel.retrieveContext = { [search] prompt in await search.contextBlock(for: prompt) }
 
         // Auto-download / load the default model (Llama 3.1 8B) on launch.
         viewModel.autoLoadDefaultIfNeeded()

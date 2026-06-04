@@ -37,6 +37,11 @@ final class RobotAssistantViewModel {
 
     let models = LocalModelRegistry.all
 
+    /// Optional retrieval hook: given the user prompt, returns a web-search
+    /// context block to prepend to the model prompt (or nil). Set by the app
+    /// when Web search is enabled. The model stays local; this only adds context.
+    var retrieveContext: ((String) async -> String?)?
+
     /// Load the default model once, automatically, on first launch of the UI.
     /// (Cached after the first download; later launches load from disk.)
     func autoLoadDefaultIfNeeded() {
@@ -141,8 +146,16 @@ final class RobotAssistantViewModel {
         responseText = ""
         isSpeaking = false
         syncAnimator() // thinking
+
+        // Optionally search the web first and prepend the results as context, so
+        // the local model can answer about current events. No-op when disabled.
+        var modelPrompt = prompt
+        if let retrieveContext, let context = await retrieveContext(prompt) {
+            modelPrompt = context + "\n\nUser question: " + prompt
+        }
+
         do {
-            _ = try await manager.generate(prompt: prompt, settings: settings) { [weak self] chunk in
+            _ = try await manager.generate(prompt: modelPrompt, settings: settings) { [weak self] chunk in
                 guard let self else { return }
                 if !self.isSpeaking {
                     self.isSpeaking = true
