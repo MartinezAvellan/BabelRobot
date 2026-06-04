@@ -91,6 +91,82 @@ red, overriding mood.
 
 ---
 
+## Robot Personality Engine (opt-in)
+
+`Robot/Personality/` is an additive, **opt-in** layer that gives the robot a
+life of its own, fully decoupled from the main LLM. It never produces an answer
+for the user — it only decides how the robot should *feel* and *move*. It is
+disabled by default (`RobotPersonalityConfig.isEnabled == false`), so the
+shipping `voice ▸ emotion ▸ behavior` fusion above is unchanged unless a host
+adopts it.
+
+```
+events (prompt/first-token/done/failed/idle…)
+        │
+        ▼
+RobotPersonalityEngine  ──▶  RobotEmotionClassifier  ──▶  RobotBehaviorDecision
+  (@MainActor @Observable)     │                            { emotion, intensity,
+        │                      ├─ DeterministicEmotionClassifier   animation, durationMs }
+        │ displayState         │     (rules — always on)            │
+        ▼                      └─ ModelEmotionClassifier            ▼ faceState (derived)
+   RobotFaceState                 (optional, disabled by default)  renderer
+```
+
+**Pieces**
+
+- `RobotEmotionState` — a richer emotional vocabulary (`neutral`, `happy`,
+  `excited`, `curious`, `thinking`, `confused`, `concerned`, `error`,
+  `sleeping`, `focused`, `surprised`). Each projects onto a concrete
+  `RobotFaceState` the existing renderer already draws.
+- `RobotAnimationIntent` — the motion vocabulary (`blink`, `lookAtCursor`,
+  `headTilt`, `pulse`, `smile`, `mouthSpeak`, `confusedLook`, `sleepBreathing`,
+  `loadingPulse`, `errorShake`) with sensible default durations.
+- `RobotBehaviorDecision` — the single output (emotion + intensity + animation +
+  hold duration). `Codable` in exactly the classifier's JSON shape.
+- `RobotPersonalityInput` — the pure context (event, user input, assistant
+  response, current state, task type) the engine reasons over.
+- `RobotPersonalityConfig` — traits (expressiveness, reactivity, sleep delay)
+  plus the disabled-by-default model-classifier settings.
+- `RobotEmotionClassifier` — the strategy boundary, with two implementations.
+
+**Deterministic first.** `DeterministicEmotionClassifier` is a small, dependency
+-free rule set and is always sufficient on its own:
+
+| Trigger | Reaction |
+| --- | --- |
+| `generationStarted` | `thinking` (or `focused` for reasoning tasks) |
+| `firstTokenReceived` | `focused` + `mouthSpeak` (the robot "talks") |
+| `generationSucceeded` | `happy` ~2 s (`excited` if the user sounded upbeat) |
+| `generationFailed` | `confused`, or `error` for a hard/technical failure |
+| user says "thank you" | `happy` (EN/PT/ES cues) |
+| user asks a question | `curious` → `thinking` |
+| idle ~5 min | `sleeping` |
+
+Transient reactions auto-clear (scaled gently by intensity); sticky ones
+(`thinking`, `focused`, `sleeping`) hold until the next event.
+
+**Optional tiny model (architecture only).** `ModelEmotionClassifier` can defer
+to a small on-device model (SmolLM2 135M/360M or Qwen 2.5 0.5B) that classifies
+**emotion only** and emits one JSON object:
+
+```json
+{ "emotion": "concerned", "intensity": 0.7, "animation": "headTilt", "durationMs": 2500 }
+```
+
+It is gated three ways and **never runs by default**: the feature and the
+classifier must both be enabled, a host must supply an `EmotionModelRunner`, and
+it is consulted only for ambiguous, content-bearing moments. A strict timeout
+falls back to the rules so the face never stalls and response latency is never
+affected. No weights are downloaded or loaded unless explicitly wired.
+
+**Adoption.** Construct a `RobotPersonalityEngine`, set
+`config.isEnabled = true`, forward the same lifecycle events the app already
+emits (`generationStarted()`, `firstTokenReceived()`, `generationSucceeded()`,
+…), and read `displayState` for the face (with `onChange` to re-sync the
+animator) — mirroring the `RobotEmotionEngine` seam.
+
+---
+
 ## Model lifecycle
 
 `LocalLLMManager` (`@MainActor`) owns a strict state machine. Only one model is

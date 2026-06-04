@@ -90,6 +90,7 @@ BabelRobot is organized into clear engines, each with a single responsibility:
 
 - **UI Layer** — SwiftUI views, theme, and the main window.
 - **Robot Engine** — the face state machine, animator, and behavior/emotion engines.
+- **Personality Engine** — an opt-in layer (`Robot/Personality/`) that gives the robot a life of its own — emotions, intensity, and animations driven by lifecycle events, independent of the LLM and disabled by default. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#robot-personality-engine-opt-in).
 - **Model Engine** — model lifecycle, the registry, and the MLX inference path.
 - **Voice Engine** — microphone capture, speech recognition, and text-to-speech.
 - **Metrics Engine** — always-on system metrics (RAM, CPU, GPU, thermal).
