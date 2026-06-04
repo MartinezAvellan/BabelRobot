@@ -78,7 +78,11 @@ final class RobotAssistantViewModel {
     var isModelLoaded: Bool { manager.state.hasResidentModel }
     var isBusy: Bool { manager.state.isBusy }
     var isGenerating: Bool { if case .generating = manager.state { return true } else { return false } }
+    var isLoading: Bool { if case .loading = manager.state { return true } else { return false } }
     var loadProgress: Double { manager.loadProgress }
+    /// True once weights are downloaded and being mapped into memory (the phase
+    /// after the download bar, shown as an indeterminate spinner).
+    var isMappingIntoMemory: Bool { manager.isMappingIntoMemory }
     var statusCaption: String { faceState.caption }
 
     // MARK: - Lifecycle hooks for the face animator
@@ -105,6 +109,13 @@ final class RobotAssistantViewModel {
             }
             syncAnimator()
         }
+    }
+
+    /// Cancel an in-progress model download/load and unlock the UI.
+    func cancelLoad() {
+        manager.cancelLoad()
+        errorMessage = nil
+        syncAnimator()
     }
 
     func unloadModel() {

@@ -88,16 +88,6 @@ struct MainRobotView: View {
                 .fixedSize()
                 .accessibilityLabel("Appearance theme")
             }
-            if viewModel.faceState == .loadingModel {
-                VStack(spacing: 4) {
-                    ProgressView(value: viewModel.loadProgress)
-                        .progressViewStyle(.linear)
-                    Text("Downloading model… \(Int((viewModel.loadProgress * 100).rounded()))%")
-                        .font(.caption)
-                        .monospacedDigit()
-                        .foregroundStyle(.secondary)
-                }
-            }
             // Compact device metrics, right under the status / theme row.
             SystemMetricsView(metrics: viewModel.metricsMonitor.metrics)
         }
@@ -230,14 +220,26 @@ struct MainRobotView: View {
 
                 modelDetails
 
+                if viewModel.isLoading { modelLoadProgress }
+
                 HStack {
-                    Button {
-                        promptFocused = false
-                        viewModel.loadSelectedModel()
-                    } label: {
-                        Label("Load Model", systemImage: "arrow.down.circle")
+                    if viewModel.isLoading {
+                        // While loading, the primary action becomes Cancel so the
+                        // user is never locked out (big models can take a while).
+                        Button(role: .cancel) {
+                            viewModel.cancelLoad()
+                        } label: {
+                            Label("Cancel", systemImage: "xmark.circle")
+                        }
+                    } else {
+                        Button {
+                            promptFocused = false
+                            viewModel.loadSelectedModel()
+                        } label: {
+                            Label("Load Model", systemImage: "arrow.down.circle")
+                        }
+                        .disabled(viewModel.isBusy)
                     }
-                    .disabled(viewModel.isBusy)
 
                     Button(role: .destructive) {
                         viewModel.unloadModel()
@@ -257,6 +259,29 @@ struct MainRobotView: View {
             }
         } label: {
             Label("Local model", systemImage: "cpu")
+        }
+    }
+
+    /// Two distinct phases: the **download** bar (determinate %, fetching weights
+    /// from Hugging Face) and the **load** spinner (mapping weights into memory).
+    @ViewBuilder
+    private var modelLoadProgress: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if viewModel.isMappingIntoMemory {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Loading into memory…")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                ProgressView(value: viewModel.loadProgress)
+                    .progressViewStyle(.linear)
+                Text("Downloading weights… \(Int((viewModel.loadProgress * 100).rounded()))%")
+                    .font(.caption)
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 

@@ -69,6 +69,10 @@ enum LocalModelState: Equatable, Sendable {
         case (.loading, .loaded), (.loading, .failed):
             return true
 
+        // The user can cancel an in-progress load.
+        case (.loading, .unloaded):
+            return true
+
         // Generation requires a loaded model.
         case (.loaded, .generating):
             return true
