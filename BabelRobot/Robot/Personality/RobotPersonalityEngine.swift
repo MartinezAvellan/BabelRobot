@@ -45,6 +45,15 @@ final class RobotPersonalityEngine {
     /// re-sync the face animator. Mirrors the legacy engines' `onChange` seam.
     var onChange: (() -> Void)?
 
+    /// True while a transient reaction (happy, confused, focused, …) is showing.
+    /// Hosts use this to let the personality override the face only when it is
+    /// actually reacting, so ambient states (cursor-follow, sleep) still show
+    /// through at rest.
+    var hasActiveReaction: Bool { activeReaction != nil }
+
+    /// Whether the feature is currently on.
+    var isActive: Bool { config.isEnabled }
+
     /// Live configuration. Swapping presets at runtime is safe.
     var config: RobotPersonalityConfig {
         didSet { if config != oldValue { reevaluateAmbient() } }

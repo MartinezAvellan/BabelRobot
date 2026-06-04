@@ -599,6 +599,15 @@ struct MainRobotView: View {
                     Toggle("Follow cursor", isOn: $companion.followCursor)
                     Toggle("Sleep when idle", isOn: $companion.sleepWhenIdle)
                     Toggle("Always on top", isOn: $companion.alwaysOnTop)
+
+                    Toggle(isOn: $companion.livelyPersonality) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Lively personality")
+                            Text("Richer emotions and animations — the robot reacts with curiosity, focus, excitement, and more.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 }
             }
         } label: {
